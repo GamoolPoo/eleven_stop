@@ -359,6 +359,27 @@ tbody tr:last-child td{border-bottom:none;}
       </div>
     </div>
 
+    <!-- ── 포지션 사이징 ── -->
+    <div>
+      <div class="section-label">포지션 사이징</div>
+      <div class="param-grid">
+        <div class="param-row">
+          <div class="param-item">
+            <label>총 투자금액 (만원)</label>
+            <input type="number" id="p_capital" value="10000" step="100" min="100">
+          </div>
+          <div class="param-item">
+            <label>허용 손실 (%)</label>
+            <input type="number" id="p_risk" value="1" step="0.1" min="0.1" max="10">
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--text2);font-family:'IBM Plex Mono',monospace;line-height:1.8;padding:4px 2px">
+          매수가능금액 = 허용손실액 ÷ 손절폭%<br>
+          <span style="color:var(--accent)">기본: 1억 × 1% = 100만원 허용</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 저장/불러오기 -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <button class="sec-btn" onclick="saveData()" style="background:rgba(0,132,255,.08);border-color:rgba(0,132,255,.3);color:var(--accent2)">💾 저장</button>
@@ -393,8 +414,9 @@ tbody tr:last-child td{border-bottom:none;}
 var manualData = [];
 var buySignals = [], tableData = [];
 var sortCol = null, sortAsc = true;
+var capitalWan = 10000; // 전역: 포지션 사이징용
 
-var PARAM_IDS = ['p_mas','p_mat','p_atrm','p_rr','p_rsin','p_rsib','p_rsiob','p_rsios','p_resbuf'];
+var PARAM_IDS = ['p_mas','p_mat','p_atrm','p_rr','p_rsin','p_rsib','p_rsiob','p_rsios','p_resbuf','p_capital','p_risk'];
 
 // ══ 버튼 활성화 ══
 function refreshRunBtn() {
@@ -787,7 +809,22 @@ function runScan() {
   var resBufRaw = +document.getElementById('p_resbuf').value;
   var resBuf = (isNaN(resBufRaw) ? 3 : resBufRaw) / 100;
 
+  // 포지션 사이징
+  capitalWan      = +document.getElementById('p_capital').value || 10000; // 전역 업데이트
+  var capital     = capitalWan * 10000; // 원 단위 (1억 = 10000만원)
+  var riskPct     = (+document.getElementById('p_risk').value || 1) / 100;
+  var allowedLoss = capital * riskPct; // 허용손실액 (원)
+
   buySignals=[];
+
+  // 포지션 사이징 계산 헬퍼
+  function calcPos(price, stop) {
+    var stopPctVal = Math.abs(price - stop) / price;
+    if (stopPctVal <= 0) return { amount: null, qty: null };
+    var amount = Math.round(allowedLoss / stopPctVal);
+    var qty    = Math.floor(amount / price);
+    return { amount: amount, qty: qty };
+  }
 
   manualData.forEach(function(m){
     var price   = m.price;
@@ -844,6 +881,7 @@ function runScan() {
     var buyOk = mustOk && (buyMax === 0 || buyScore > 0);
 
     if (buyOk) {
+      var _pos0 = calcPos(price, stopBuy);
       buySignals.push({
         name: m.name, price: price, chgPct: '−',
         entry: entry, qty: qty,
@@ -868,6 +906,7 @@ function runScan() {
         conds:      buyConds.map(function(c){ return c.ok; }),
         condLabels: buyConds.map(function(c){ return c.label; }),
         isMust:     buyConds.map(function(c){ return c.must; }),
+        posAmount: _pos0.amount, posQty: _pos0.qty,
       });
     }
 
@@ -902,6 +941,7 @@ function runScan() {
       var ma60Score = ma60Conds.filter(function(c){ return c.ok; }).length;
       var ma60Max   = ma60Conds.length;
 
+      var _pos1 = calcPos(price, stopMa60);
       buySignals.push({
         name: m.name, price: price, chgPct: '−',
         entry: entry, qty: qty,
@@ -926,6 +966,7 @@ function runScan() {
         conds:      ma60Conds.map(function(c){ return c.ok; }),
         condLabels: ma60Conds.map(function(c){ return c.label; }),
         isMust:     ma60Conds.map(function(c){ return c.must; }),
+        posAmount: _pos1.amount, posQty: _pos1.qty,
       });
     }
 
@@ -953,6 +994,7 @@ function runScan() {
       var belowScore = belowConds.filter(function(c){ return c.ok; }).length;
       var belowMax   = belowConds.length;
 
+      var _pos2 = calcPos(price, stopBelow);
       buySignals.push({
         name: m.name, price: price, chgPct: '−',
         entry: entry, qty: qty,
@@ -977,6 +1019,7 @@ function runScan() {
         conds:      belowConds.map(function(c){ return c.ok; }),
         condLabels: belowConds.map(function(c){ return c.label; }),
         isMust:     belowConds.map(function(c){ return c.must; }),
+        posAmount: _pos2.amount, posQty: _pos2.qty,
       });
     }
 
@@ -1012,6 +1055,7 @@ function runScan() {
       var momMustOk = momConds.filter(function(c){ return c.must; }).every(function(c){ return c.ok; });
 
       if (momMustOk && momScore > 0) {
+        var _pos3 = calcPos(price, stopMom);
         buySignals.push({
           name: m.name, price: price, chgPct: '−',
           entry: entry, qty: qty,
@@ -1036,6 +1080,7 @@ function runScan() {
           conds:      momConds.map(function(c){ return c.ok; }),
           condLabels: momConds.map(function(c){ return c.label; }),
           isMust:     momConds.map(function(c){ return c.must; }),
+          posAmount: _pos3.amount, posQty: _pos3.qty,
         });
       }
     }
@@ -1100,6 +1145,7 @@ function renderResults() {
     +'<th onclick="sortT(\'target2\')">2차목표</th>'
     +'<th onclick="sortT(\'fromHigh\')">고점대비</th>'
     +'<th class="col-hide-mobile" onclick="sortT(\'rangePos\')">60일위치</th>'
+    +'<th onclick="sortT(\'posAmount\')">매수가능</th>'
     +'<th onclick="sortT(\'score\')">강도</th>'
     +'<th class="col-hide-mobile">필수조건</th>'
     +'<th class="col-hide-mobile">보조조건</th>'
@@ -1165,6 +1211,19 @@ function renderCard(s, type) {
     +(s.fromHigh !== null ? '<span class="sm"><span class="mk">고점대비 </span><span style="color:'+(parseFloat(s.fromHigh)>=-10?'var(--warn)':'var(--accent)')+'">'+s.fromHigh+'%</span></span>' : '')
     +'</div>'
     +'</div>'
+    // ── 포지션 사이징 ──
+    +(s.posAmount !== null ? (function(){
+        var pctOfCap = s.posAmount / (capitalWan * 10000) * 100;
+        return '<div style="margin-top:5px;padding:6px 8px;background:rgba(192,132,252,.05);border-radius:4px;border:1px solid rgba(192,132,252,.2)">'
+          +'<div style="font-size:8px;color:#c084fc;font-family:\'IBM Plex Mono\',monospace;margin-bottom:4px;letter-spacing:1px">📐 포지션 사이징 (손절폭 기반)</div>'
+          +'<div class="smetrics">'
+          +'<span class="sm"><span class="mk">매수가능 </span><span style="color:#c084fc;font-weight:600">'+Math.round(s.posAmount/10000).toLocaleString()+'만원</span>'
+          +'<span style="font-size:9px;color:var(--text2);margin-left:4px">(자본 '+pctOfCap.toFixed(1)+'%)</span></span>'
+          +'<span class="sm"><span class="mk">수량 </span><span style="color:#c084fc">'+s.posQty.toLocaleString()+'주</span>'
+          +'<span style="font-size:9px;color:var(--text2);margin-left:4px">≈ '+(Math.round(s.posQty*s.price/10000)).toLocaleString()+'만원</span></span>'
+          +'</div>'
+          +'</div>';
+      })() : '')
     // ── 매수가 기준 ──
     +(s.entry !== null ? (function(){
         var pnlPct   = ((s.price - s.entry) / s.entry * 100).toFixed(2);
@@ -1286,6 +1345,15 @@ function renderTable(data) {
         })()
       +'<td style="color:'+(t.fromHigh!==null?(parseFloat(t.fromHigh)>=-10?'var(--warn)':'var(--accent)'):'var(--text3)')+'">'+(t.fromHigh!==null?t.fromHigh+'%':'−')+'</td>'
       +'<td class="col-hide-mobile" style="color:'+(t.rangePos!==null?(parseFloat(t.rangePos)>=70?'var(--danger)':parseFloat(t.rangePos)<=30?'var(--accent)':'var(--text2)'):'var(--text3)')+'">'+(t.rangePos!==null?t.rangePos+'%':'−')+'</td>'
+      +(function(){
+          if (t.posAmount === null || t.posAmount === undefined) return '<td class="dim-c">−</td>';
+          var wan = Math.round(t.posAmount / 10000);
+          var pct = (t.posAmount / (capitalWan * 10000) * 100).toFixed(1);
+          return '<td style="color:#c084fc">'
+            +'<span style="font-weight:600">'+wan.toLocaleString()+'만</span>'
+            +'<br><span style="font-size:9px;color:var(--text2)">'+t.posQty.toLocaleString()+'주 · '+pct+'%</span>'
+            +'</td>';
+        })()
       +'<td style="white-space:nowrap">'+stars+' <span style="font-size:9px;color:var(--text2)">'+scoreN+'/'+t.maxScore+'</span></td>'
       +'<td class="col-hide-mobile">'+(mustTags||'<span class="dim-c">−</span>')+'</td>'
       +'<td class="col-hide-mobile">'+(bonusTags||'<span class="dim-c">−</span>')+'</td>'
